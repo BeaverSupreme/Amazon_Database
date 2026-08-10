@@ -1,0 +1,18 @@
+name: Codzienne Odświeżanie Bazy Amazon (21 Rynków i Sprzedaż 30 dni)
+
+on:
+  schedule:
+    # Uruchamiaj automatycznie codziennie w nocy o 03:00 UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch: # Umożliwia też ręczne kliknięcie przycisku na stronie GitHuba
+
+jobs:
+  refresh-render-site:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wysłanie sygnału odświeżania do Render.com
+        run: |
+          echo "Automatyczne wywołanie nocnej aktualizacji bazy produktów..."
+          # Jeśli chcesz automatyzacji z GitHuba, wklej poniżej swój Deploy Hook z Render.com:
+          # curl -X POST "https://api.render.com/deploy/srv-xxxxxxxxxxxx"
+          echo "Gotowe!"
