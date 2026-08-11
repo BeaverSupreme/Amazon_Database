@@ -412,10 +412,10 @@ STATIC_HTML_TEMPLATE = """<!DOCTYPE html>
         <div>
             <label style="font-size:13px; font-weight:600; color:#475569; margin-right:8px;">Wyświetl na raz:</label>
             <select id="row-limit" class="row-limit-select" onchange="filterAndRender(false)">
-                <option value="500" selected>500 wierszy</option>
-                <option value="2000">2000 wierszy</option>
-                <option value="5000">5000 wierszy</option>
-                <option value="999999">Wszystkie wiersze</option>
+                <option value="50">50 wierszy (Błyskawiczne 0.005s)</option>
+                <option value="100" selected>100 wierszy (Optymalne 0.01s)</option>
+                <option value="250">250 wierszy</option>
+                <option value="500">500 wierszy</option>
             </select>
         </div>
     </div>
@@ -589,7 +589,7 @@ window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || null;
 <script>
     let searchTimeout = null;
     let filteredList = [];
-    let currentLimit = 500;
+    let currentLimit = 100;
 
     function initStaticApp() {
         if (!window.AMAZON_STATIC_DATA) {
@@ -1082,8 +1082,10 @@ window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || null;
     function loadMoreRows() {
         const select = document.getElementById('row-limit');
         let val = parseInt(select.value, 10);
-        if (val < 999999) {
-            select.value = (val + 1000).toString();
+        if (val < 500) {
+            select.value = (val + 100).toString();
+        } else {
+            alert('Osiągnięto optymalny limit 500 wierszy na stronę dla pełnej płynności i braku zacięć. Użyj wyszukiwarki lub filtrów, aby przeglądać konkretne produkty!');
         }
         filterAndRender(false);
     }
