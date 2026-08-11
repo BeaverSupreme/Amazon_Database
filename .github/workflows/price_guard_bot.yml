@@ -22,7 +22,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
          - name: 3. Uruchomienie generatora i weryfikacja ofert w chmurze
         run: |
           python3 import_all_amazon_markets.py --seed-all 1000000 --monitor-prices 1000000
