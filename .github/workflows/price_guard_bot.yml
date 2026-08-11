@@ -23,11 +23,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 3. Uruchomienie generatora i weryfikacja ofert w chmurze (100% bezbłędne)
+      - name: 3. Uruchomienie generatora i weryfikacja ofert w chmurze
         run: |
-          echo "=== START CHMUROWEGO STRAŻNIKA CEN (PRICE GUARD) ==="
-          # Główna komenda generująca oferty, historię 2025 r. i pliki webowe:
-          python3 import_all_amazon_markets.py --seed-all 1000000
+          python3 import_all_amazon_markets.py --seed-all 1000000 --monitor-prices 1000000
           
           # Bezpieczne sprawdzenie, czy wgrałeś też dodatkowy plik price_monitor_bot.py:
           if [ -f "price_monitor_bot.py" ]; then
