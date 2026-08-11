@@ -1,49 +1,26 @@
-name: 🤖 Strażnik Cen — Codzienny Monitor i Aktualizacja na GitHub Actions
+name: Straznik Cen
 
 on:
   schedule:
-    # Uruchamiaj automatycznie codziennie rano o 07:00 UTC (i o 15:00 UTC)
-    - cron: '0 7,15 * * *'
-  workflow_dispatch: # Umożliwia ręczne kliknięcie przycisku "Run workflow" w zakładce Actions na GitHubie!
+    - cron: "0 7 * * *"
+  workflow_dispatch:
 
 permissions:
-  contents: write # Uprawnienie dla bota, aby mógł wgrać zaktualizowany plik data.js do repozytorium
+  contents: write
 
 jobs:
-  monitor-and-update-prices:
+  update:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Pobranie plików repozytorium
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 1
-
-      - name: 2. Konfiguracja darmowego środowiska Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-         - name: 3. Uruchomienie generatora i weryfikacja ofert w chmurze
-        run: |
-          python3 import_all_amazon_markets.py --seed-all 1000000 --monitor-prices 1000000
-          
-          # Bezpieczne sprawdzenie, czy wgrałeś też dodatkowy plik price_monitor_bot.py:
-          if [ -f "price_monitor_bot.py" ]; then
-            echo "-> Wykryto plik price_monitor_bot.py, uruchamianie weryfikacji cen..."
-            python3 price_monitor_bot.py --monitor 100 --delay 0.5
-          else
-            echo "✔ Skrypt price_monitor_bot.py nie jest wgrany do repozytorium — baza została pomyślnie zaktualizowana przez główny importer!"
-          fi
-          echo "=== WERYFIKACJA CEN ZAKOŃCZONA ==="
-
-      - name: 4. Wgranie zaktualizowanych cen na GitHub (Render.com odświeży stronę automatycznie!)
-        run: |
-          git config --global user.name "GitHub Price Guard Bot"
-          git config --global user.email "bot@amazon-database.github.io"
+          python-version: "3.11"
+      - run: |
+          python3 import_all_amazon_markets.py --seed-all 100000 --monitor-prices 100
+      - run: |
+          git config user.name "GitHub Bot"
+          git config user.email "bot@github.com"
           git add data.js index.html
-          if ! git diff --staged --quiet; then
-            git commit -m "🤖 Auto-Price-Guard: Aktualizacja prawdziwych cen, obniżek i sprzedaży 30d [skip ci]"
-            git push
-            echo "✅ SUKCES! Zaktualizowano cenniki -> Render.com zaraz opublikuje nowe ceny na Twojej stronie!"
-          else
-            echo "✔ Wszystkie badane ceny są stabilne — brak zmian do zapisania."
-          fi
+          git commit -m "Auto-update" || true
+          git push || true
