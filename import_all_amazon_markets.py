@@ -412,10 +412,12 @@ STATIC_HTML_TEMPLATE = """<!DOCTYPE html>
         <div>
             <label style="font-size:13px; font-weight:600; color:#475569; margin-right:8px;">Wyświetl na raz:</label>
             <select id="row-limit" class="row-limit-select" onchange="filterAndRender(false)">
-                <option value="50">50 wierszy (Błyskawiczne 0.005s)</option>
-                <option value="100" selected>100 wierszy (Optymalne 0.01s)</option>
-                <option value="250">250 wierszy</option>
+                <option value="50">50 wierszy (Błyskawiczne)</option>
+                <option value="100">100 wierszy</option>
+                <option value="250" selected>250 wierszy (Optymalny przegląd)</option>
                 <option value="500">500 wierszy</option>
+                <option value="1000">1000 wierszy (Szeroki widok)</option>
+                <option value="2500">2500 wierszy (Maksymalna lista)</option>
             </select>
         </div>
     </div>
@@ -589,7 +591,7 @@ window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || null;
 <script>
     let searchTimeout = null;
     let filteredList = [];
-    let currentLimit = 100;
+    let currentLimit = 250;
 
     function initStaticApp() {
         if (!window.AMAZON_STATIC_DATA) {
@@ -1082,10 +1084,10 @@ window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || null;
     function loadMoreRows() {
         const select = document.getElementById('row-limit');
         let val = parseInt(select.value, 10);
-        if (val < 500) {
-            select.value = (val + 100).toString();
+        if (val < 2500) {
+            select.value = (val + 250).toString();
         } else {
-            alert('Osiągnięto optymalny limit 500 wierszy na stronę dla pełnej płynności i braku zacięć. Użyj wyszukiwarki lub filtrów, aby przeglądać konkretne produkty!');
+            alert('Osiągnięto limit 2500 wierszy na stronę. Użyj wyszukiwarki lub filtrów, aby przeglądać konkretne produkty!');
         }
         filterAndRender(false);
     }
@@ -1278,12 +1280,13 @@ def export_static_web_app(limit_products, conn):
     cursor.execute("SELECT platform_code, name FROM platforms;")
     plat_map = {r[0]: r[1] for r in cursor.fetchall()}
 
+    actual_export_limit = min(max(limit_products, 10000), 35000)
     cursor.execute("""
         SELECT asin, country_code, title, brand, price, rating, review_count, category_slug, url, COALESCE(sales_volume, 500), COALESCE(platform, 'Amazon'), COALESCE(price_1y_ago, price * 1.1), COALESCE(sales_1y_ago, 0)
         FROM products
         ORDER BY COALESCE(sales_volume, 0) DESC, rowid DESC
         LIMIT ?;
-    """, (limit_products,))
+    """, (actual_export_limit,))
     prod_rows = cursor.fetchall()
 
     products = [
@@ -1308,24 +1311,30 @@ def export_static_web_app(limit_products, conn):
         for r in prod_rows
     ]
 
-    static_data = {
-        "total_db_count": total_db_count,
+    static_data_full = {
+        "total_db_count": max(total_db_count, len(products)),
         "platforms": platforms,
         "countries": countries,
         "categories": categories,
         "products": products
     }
 
-    static_data_json = json.dumps(static_data, ensure_ascii=False)
-
     with open("data.js", "w", encoding="utf-8") as f:
         f.write("window.AMAZON_STATIC_DATA = ")
-        f.write(static_data_json)
+        json.dump(static_data_full, f, ensure_ascii=False)
         f.write(";\n")
 
+    static_data_offline = {
+        "total_db_count": max(total_db_count, len(products)),
+        "platforms": platforms,
+        "countries": countries,
+        "categories": categories,
+        "products": products[:10000]
+    }
+    static_data_json_offline = json.dumps(static_data_offline, ensure_ascii=False)
     html_content = STATIC_HTML_TEMPLATE.replace(
         "window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || null;",
-        f"window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || {static_data_json};"
+        f"window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || {static_data_json_offline};"
     )
 
     with open("index.html", "w", encoding="utf-8") as f:
@@ -1336,7 +1345,7 @@ def export_static_web_app(limit_products, conn):
     print(f"  -> data.js     (wyeksportowano komplet {len(products):,} ofert i aukcji)")
     print("====================================================================\n")
 
-def seed_all_marketplaces(total_count, conn):
+def seed_all_marketplaces(total_count, conn, export=True):
     print("====================================================================")
     print(f"  MASOWY IMPORT Z ARCHIWUM CEN I SPRZEDAŻĄ RYNKOWĄ (Cel: {total_count:,})")
     print("====================================================================")
@@ -1438,9 +1447,10 @@ def seed_all_marketplaces(total_count, conn):
         print(f"  * {name:<30} ({code}): {cnt:,} ofert")
     print("====================================================================\n")
 
-    export_static_web_app(total_inserted, conn)
+    if export:
+        export_static_web_app(total_inserted, conn)
 
-def monitor_all_prices_in_db(limit_products, conn):
+def monitor_all_prices_in_db(limit_products, conn, export=True):
     cursor = conn.cursor()
     cursor.execute("SELECT asin, country_code, price, price_1y_ago FROM products LIMIT ?;", (limit_products,))
     rows = cursor.fetchall()
@@ -1463,7 +1473,8 @@ def monitor_all_prices_in_db(limit_products, conn):
     """, updates)
     conn.commit()
     print(f"[STRAŻNIK CEN] Zweryfikowano i zaktualizowano ceny dla {len(rows):,} ofert na 4 rynkach!")
-    export_static_web_app(max(limit_products, 100000), conn)
+    if export:
+        export_static_web_app(max(limit_products, 100000), conn)
 
 def heal_all_urls_in_db(conn):
     cursor = conn.cursor()
@@ -1502,14 +1513,17 @@ def main():
         rates = fetch_live_exchange_rates()
         prods = fetch_public_ecommerce_products(limit=args.import_free_api)
         sync_free_api_to_sqlite(prods, rates, conn)
-        export_static_web_app(100000, conn)
+        if not args.seed_all and not args.monitor_prices:
+            export_static_web_app(100000, conn)
 
-    if args.seed_all:
-        seed_all_marketplaces(args.seed_all, conn)
-
-    if args.monitor_prices:
-        monitor_all_prices_in_db(args.monitor_prices, conn)
-    elif not args.heal_urls and not args.seed_all and not args.import_free_api:
+    if args.seed_all and args.monitor_prices:
+        seed_all_marketplaces(args.seed_all, conn, export=False)
+        monitor_all_prices_in_db(args.monitor_prices, conn, export=True)
+    elif args.seed_all:
+        seed_all_marketplaces(args.seed_all, conn, export=True)
+    elif args.monitor_prices:
+        monitor_all_prices_in_db(args.monitor_prices, conn, export=True)
+    elif not args.heal_urls and not args.import_free_api:
         parser.print_help()
 
     conn.close()
