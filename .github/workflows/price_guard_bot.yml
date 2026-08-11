@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: |
-          python3 import_all_amazon_markets.py --seed-all 100000 --monitor-prices 100
+         python3 import_all_amazon_markets.py --seed-all 100000 --monitor-prices 100000
       - run: |
           git config user.name "GitHub Bot"
           git config user.email "bot@github.com"
