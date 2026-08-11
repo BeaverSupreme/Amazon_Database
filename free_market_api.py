@@ -108,47 +108,7 @@ def fetch_public_ecommerce_products(limit=100):
     return products
 
 # =============================================================================
-# 3. OPCJONALNE POBIERANIE Z BASELINKER API (JEŚLI PODANO TOKEN)
-# =============================================================================
-def fetch_baselinker_products(token):
-    print("[BASELINKER API] Łączenie z Twoim kontem BaseLinker...")
-    url = "https://api.baselinker.com/connector.php"
-    headers = {"X-BLToken": token}
-    payload = {
-        "method": "getProductsList",
-        "parameters": json.dumps({})
-    }
-    data = urllib.parse.urlencode(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers)
-    products = []
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            resp_data = json.loads(r.read().decode("utf-8"))
-            if resp_data.get("status") == "SUCCESS":
-                items = resp_data.get("products", {})
-                for prod_id, item in items.items():
-                    title = item.get("name", f"BaseLinker #{prod_id}")
-                    sku = item.get("sku", f"BL-{prod_id}")
-                    price = float(item.get("price_brutto", 99.0))
-                    products.append({
-                        "sku": str(sku),
-                        "title": title,
-                        "brand": "BaseLinker",
-                        "price_usd": round(price / 3.98, 2),
-                        "rating": 4.8,
-                        "reviews": 120,
-                        "category": "other",
-                        "sales_vol": random.randint(100, 5000)
-                    })
-                print(f"  -> Pobrano pomyślnie {len(products)} ofert z Twojego BaseLinkera!")
-            else:
-                print(f"  [BŁĄD BASELINKER] {resp_data.get('error_message')}")
-    except Exception as e:
-        print(f"  [BŁĄD BASELINKER API] {e}")
-    return products
-
-# =============================================================================
-# 4. ZAPIS DO BAZY SQLITE I GENEROWANIE AUKCJI NA 4 RYNKI EUROPY
+# 3. ZAPIS DO BAZY SQLITE I GENEROWANIE AUKCJI NA 4 RYNKI EUROPY
 # =============================================================================
 def sync_free_api_to_sqlite(products, rates, conn):
     if not products:
@@ -168,7 +128,6 @@ def sync_free_api_to_sqlite(products, rates, conn):
     batch = []
     for item in products:
         for idx, market in enumerate(marketplaces):
-            # Urozmaicenie platform dla pełnej widoczności we wszystkich 4 rynkach
             platforms_list = ["Amazon", "Allegro", "eBay", "AliExpress"]
             plat = platforms_list[idx % len(platforms_list)]
             if market["code"] == "PL" and idx % 2 == 0:
@@ -212,9 +171,8 @@ def sync_free_api_to_sqlite(products, rates, conn):
     return len(batch)
 
 def main():
-    parser = argparse.ArgumentParser(description="Konektor darmowych API E-Commerce za 0 zł")
-    parser.add_argument("--fetch", type=int, default=100, help="Liczba produktów z darmowego publicznego API")
-    parser.add_argument("--baselinker-token", type=str, help="Token API BaseLinker (opcjonalny)")
+    parser = argparse.ArgumentParser(description="Konektor darmowych API E-Commerce za 0 zł (bez wymogu klucza API)")
+    parser.add_argument("--fetch", type=int, default=100, help="Liczba produktów z darmowego publicznego API E-Commerce")
     args = parser.parse_args()
 
     conn, db_path = get_optimized_db_connection()
@@ -222,10 +180,6 @@ def main():
 
     rates = fetch_live_exchange_rates()
     products = fetch_public_ecommerce_products(limit=args.fetch)
-
-    if args.baselinker_token:
-        bl_products = fetch_baselinker_products(args.baselinker_token)
-        products.extend(bl_products)
 
     total_synced = sync_free_api_to_sqlite(products, rates, conn)
     if total_synced > 0:
