@@ -26,6 +26,7 @@ import threading
 import webbrowser
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
+from product_catalog import realistic_sales
 
 def get_db_path():
     paths_to_check = [
@@ -152,6 +153,8 @@ def heal_and_migrate_database(silent=False):
             ("sales_volume", "INTEGER DEFAULT 0"),
             ("price_1y_ago", "REAL DEFAULT 0.0"),
             ("sales_1y_ago", "INTEGER DEFAULT 0"),
+            ("price_2y_ago", "REAL DEFAULT 0.0"),
+            ("sales_2y_ago", "INTEGER DEFAULT 0"),
             ("platform", "TEXT DEFAULT 'Amazon'"),
             ("updated_at", "TEXT DEFAULT ''")
         ]:
@@ -164,17 +167,21 @@ def heal_and_migrate_database(silent=False):
         cursor.execute("DELETE FROM products WHERE country_code NOT IN ('PL', 'UK', 'DE', 'FR');")
         conn.commit()
 
-        cursor.execute("SELECT asin, country_code, title, brand, category_slug, url, sales_volume, price, price_1y_ago, COALESCE(platform, 'Amazon'), COALESCE(sales_1y_ago, 0) FROM products;")
+        cursor.execute("SELECT asin, country_code, title, brand, category_slug, url, sales_volume, price, price_1y_ago, COALESCE(platform, 'Amazon'), COALESCE(sales_1y_ago, 0), COALESCE(price_2y_ago, 0), COALESCE(sales_2y_ago, 0) FROM products;")
         all_rows = cursor.fetchall()
 
         updates = []
-        sales_tiers = [100, 200, 300, 500, 800, 1000, 1500, 2500, 4000, 6500, 10000, 15000, 25000, 40000]
 
-        for asin, country_code, title, brand, category_slug, url, sales_vol, price, p_1y, platform_code, s_1y in all_rows:
+        for asin, country_code, title, brand, category_slug, url, sales_vol, price, p_1y, platform_code, s_1y, p_2y, s_2y in all_rows:
             needs_update = False
-            new_vol = sales_vol or random.choice(sales_tiers)
+            if sales_vol and sales_vol > 0:
+                new_vol = sales_vol
+            else:
+                new_vol = realistic_sales(category_slug, price or 50.0)
             new_p_1y = p_1y or round((price or 100.0) * random.choice([0.8, 0.9, 1.1, 1.2]), 2)
             new_s_1y = s_1y or max(round(new_vol * random.choice([0.70, 0.80, 0.90, 1.00, 1.05, 1.15, 1.25])), 50)
+            new_p_2y = p_2y or round(new_p_1y * random.choice([0.95, 1.0, 1.1]), 2)
+            new_s_2y = s_2y or max(round(new_s_1y * random.choice([0.85, 0.95, 1.05])), 20)
 
             if not url or "/oferta/" in url or "/itm/" in url or "/item/" in url or ".amazon.it" in url or ".amazon.es" in url or ".amazon.ca" in url or ".amazon.com" in url or "B0PBBWSQAG" in url:
                 needs_update = True
@@ -186,12 +193,12 @@ def heal_and_migrate_database(silent=False):
                     asin_list = VERIFIED_GLOBAL_ASINS.get(category_slug, DEFAULT_GLOBAL_ASINS)
                     _, brand, title = random.choice(asin_list)
                 new_url = generate_guaranteed_auction_url(platform_code, country_code, asin, brand, title)
-                updates.append((brand, title, new_url, new_vol, new_p_1y, platform_code, new_s_1y, asin, country_code))
+                updates.append((brand, title, new_url, new_vol, new_p_1y, platform_code, new_s_1y, new_p_2y, new_s_2y, asin, country_code))
 
         if updates:
             cursor.executemany("""
                 UPDATE products
-                SET brand = ?, title = ?, url = ?, sales_volume = ?, price_1y_ago = ?, platform = ?, sales_1y_ago = ?
+                SET brand = ?, title = ?, url = ?, sales_volume = ?, price_1y_ago = ?, platform = ?, sales_1y_ago = ?, price_2y_ago = ?, sales_2y_ago = ?
                 WHERE asin = ? AND country_code = ?;
             """, updates)
             conn.commit()
@@ -496,10 +503,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div>
             <label style="font-size:13px; font-weight:600; color:#475569; margin-right:8px;">Wyświetl na raz:</label>
             <select id="row-limit" class="row-limit-select" onchange="filterAndRender(false)">
-                <option value="50">50 wierszy (Błyskawiczne 0.005s)</option>
-                <option value="100" selected>100 wierszy (Optymalne 0.01s)</option>
-                <option value="250">250 wierszy</option>
+                <option value="50">50 wierszy (Błyskawiczne)</option>
+                <option value="100">100 wierszy</option>
+                <option value="250" selected>250 wierszy (Optymalny przegląd)</option>
                 <option value="500">500 wierszy</option>
+                <option value="1000">1000 wierszy (Szeroki widok)</option>
+                <option value="2500">2500 wierszy (Maksymalna lista)</option>
             </select>
         </div>
     </div>
@@ -673,7 +682,7 @@ window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || null;
 <script>
     let searchTimeout = null;
     let filteredList = [];
-    let currentLimit = 100;
+    let currentLimit = 250;
 
     function initStaticApp() {
         if (!window.AMAZON_STATIC_DATA) {
@@ -1176,10 +1185,10 @@ window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || null;
     function loadMoreRows() {
         const select = document.getElementById('row-limit');
         let val = parseInt(select.value, 10);
-        if (val < 500) {
-            select.value = (val + 100).toString();
+        if (val < 2500) {
+            select.value = (val + 250).toString();
         } else {
-            alert('Osiągnięto optymalny limit 500 wierszy na stronę dla pełnej płynności i braku zacięć. Użyj wyszukiwarki lub filtrów, aby przeglądać konkretne produkty!');
+            alert('Osiągnięto limit 2500 wierszy na stronę. Użyj wyszukiwarki lub filtrów, aby przeglądać konkretne produkty!');
         }
         filterAndRender(false);
     }
@@ -1373,7 +1382,7 @@ class DatabaseHandler(BaseHTTPRequestHandler):
                 total_matching = cursor.fetchone()[0]
 
                 select_query = f"""
-                    SELECT p.asin, p.country_code, p.title, p.brand, p.price, p.rating, p.review_count, p.category_slug, p.url, COALESCE(p.sales_volume, 500), COALESCE(p.platform, 'Amazon'), COALESCE(p.price_1y_ago, p.price * 1.1), COALESCE(p.sales_1y_ago, 0)
+                    SELECT p.asin, p.country_code, p.title, p.brand, p.price, p.rating, p.review_count, p.category_slug, p.url, COALESCE(p.sales_volume, 500), COALESCE(p.platform, 'Amazon'), COALESCE(p.price_1y_ago, p.price * 1.1), COALESCE(p.sales_1y_ago, 0), COALESCE(p.price_2y_ago, p.price * 1.2), COALESCE(p.sales_2y_ago, 0)
                     FROM products p 
                     WHERE {where_sql} 
                     ORDER BY COALESCE(p.sales_volume, 0) DESC, p.rowid DESC 
@@ -1398,7 +1407,9 @@ class DatabaseHandler(BaseHTTPRequestHandler):
                         "platform_code": r[10],
                         "platform_name": code_to_platname.get(r[10], r[10]),
                         "price_1y_ago": r[11],
-                        "sales_1y_ago": r[12] if r[12] > 0 else max(round((r[9] or 500) * 0.8), 50)
+                        "sales_1y_ago": r[12] if r[12] > 0 else max(round((r[9] or 500) * 0.8), 50),
+                        "price_2y_ago": r[13] if r[13] > 0 else round((r[11] or (r[4] or 100)) * 1.1, 2),
+                        "sales_2y_ago": r[14] if r[14] > 0 else max(round((r[12] or (r[9] or 500)) * 0.9), 20)
                     }
                     for r in prod_rows
                 ]
@@ -1444,11 +1455,32 @@ class DatabaseHandler(BaseHTTPRequestHandler):
             except Exception:
                 self.safe_write(b"window.AMAZON_STATIC_DATA = window.AMAZON_STATIC_DATA || null;")
 
+        # EKSPORT DZIELONY: serwowanie manifestu i plików data_000.js...data_019.js
+        elif parsed.path in ("/data_manifest.js",) or re.fullmatch(r"/data_\d{3}\.js", parsed.path or ""):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            base = os.path.dirname(os.path.abspath(__file__))
+            chunk_file = os.path.join(base, parsed.path.lstrip("/"))
+            if os.path.exists(chunk_file):
+                with open(chunk_file, "rb") as f:
+                    self.safe_write(f.read())
+            else:
+                self.safe_write(b"// brak pliku " + parsed.path.encode("utf-8"))
+
         else:
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.safe_write(HTML_TEMPLATE.encode("utf-8"))
+            # Jeżeli istnieje wygenerowana statyczna aplikacja (chunked) - serwujemy ją,
+            # dzięki czemu lokalny serwer wygląda identycznie jak strona na Render/GitHub.
+            static_index = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+            if os.path.exists(static_index):
+                with open(static_index, "rb") as f:
+                    self.safe_write(f.read())
+            else:
+                self.safe_write(HTML_TEMPLATE.encode("utf-8"))
 
     def do_POST(self):
         parsed = urlparse(self.path)
